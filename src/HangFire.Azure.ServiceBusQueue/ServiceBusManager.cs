@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using Microsoft.ServiceBus;
-using Microsoft.ServiceBus.Messaging;
+using Microsoft.Azure.ServiceBus;
+using Microsoft.Azure.ServiceBus.Management;
 using Hangfire.Logging;
+using System.Threading.Tasks;
+using Microsoft.Azure.ServiceBus.Core;
 
 namespace Hangfire.Azure.ServiceBusQueue
 {
@@ -12,64 +14,62 @@ namespace Hangfire.Azure.ServiceBusQueue
 
         // Stores the pre-created QueueClients (note the key is the unprefixed queue name)
         private readonly Dictionary<string, QueueClient> _clients;
-
-        private readonly ServiceBusQueueOptions _options;
-        private readonly NamespaceManager _namespaceManager;
-        private readonly MessagingFactory _messagingFactory;
+        private readonly ManagementClient _managementClient;
 
         public ServiceBusManager(ServiceBusQueueOptions options)
         {
             if (options == null) throw new ArgumentNullException("options");
 
-            _options = options;
+            Options = options;
 
             _clients = new Dictionary<string, QueueClient>(options.Queues.Length);
-            _namespaceManager = NamespaceManager.CreateFromConnectionString(options.ConnectionString);
-            _messagingFactory = MessagingFactory.CreateFromConnectionString(options.ConnectionString);
-
-            // If we have this option set to true then we will create all clients up-front, otherwise
-            // the creation will be delayed until the first client is retrieved
+            _managementClient = new ManagementClient(options.ConnectionString);
             if (options.CheckAndCreateQueues)
             {
-                CreateQueueClients();
+                Task.Run(() => CreateQueueClients()).Wait();
             }
         }
 
-        public ServiceBusQueueOptions Options { get { return _options; } }
+        public ServiceBusQueueOptions Options { get; }
 
-        public QueueClient GetClient(string queue)
+        public async Task<QueueClient> GetClientAsync(string queue)
         {
-            if (_clients.Count != _options.Queues.Length)
+            if (_clients.Count != Options.Queues.Length)
             {
-                CreateQueueClients();
+                await CreateQueueClients().ConfigureAwait(false);
             }
 
             return _clients[queue];
         }
 
-        public QueueDescription GetDescription(string queue)
+        public Task<QueueDescription> GetDescriptionAsync(string queue)
         {
-            return _namespaceManager.GetQueue(_options.GetQueueName(queue));
+            return _managementClient.GetQueueAsync(Options.GetQueueName(queue));
         }
 
-        private void CreateQueueClients()
+        public Task<QueueRuntimeInfo> GetQueueRuntimeInfoAsync(string queue)
         {
-            foreach (var queue in _options.Queues)
-            {
-                var prefixedQueue = _options.GetQueueName(queue);
+            return _managementClient.GetQueueRuntimeInfoAsync(Options.GetQueueName(queue));
+        }
 
-                CreateQueueIfNotExists(prefixedQueue, _namespaceManager, _options);
+        private async Task CreateQueueClients()
+        {
+            foreach (var queue in Options.Queues)
+            {
+                var prefixedQueue = Options.GetQueueName(queue);
+
+                await CreateQueueIfNotExistsAsync(prefixedQueue).ConfigureAwait(false);
 
                 Logger.TraceFormat("Creating new QueueClient for queue {0}", prefixedQueue);
 
                 // Do not store as prefixed queue to avoid having to re-create name in GetClient method
-                _clients[queue] = this._messagingFactory.CreateQueueClient(prefixedQueue, ReceiveMode.PeekLock);
+                _clients[queue] = new QueueClient(Options.ConnectionString, prefixedQueue, ReceiveMode.PeekLock);
             }
         }
 
-        private static void CreateQueueIfNotExists(string prefixedQueue, NamespaceManager namespaceManager, ServiceBusQueueOptions options)
+        private async Task CreateQueueIfNotExistsAsync(string prefixedQueue)
         {
-            if (options.CheckAndCreateQueues == false)
+            if (Options.CheckAndCreateQueues == false)
             {
                 Logger.InfoFormat("Not checking for the existence of the queue {0}", prefixedQueue);
 
@@ -80,7 +80,7 @@ namespace Hangfire.Azure.ServiceBusQueue
             {
                 Logger.InfoFormat("Checking if queue {0} exists", prefixedQueue);
 
-                if (namespaceManager.QueueExists(prefixedQueue))
+                if (await _managementClient.QueueExistsAsync(prefixedQueue).ConfigureAwait(false))
                 {
                     return;
                 }
@@ -88,17 +88,17 @@ namespace Hangfire.Azure.ServiceBusQueue
                 Logger.InfoFormat("Creating new queue {0}", prefixedQueue);
 
                 var description = new QueueDescription(prefixedQueue);
-                if (options.RequiresDuplicateDetection != null)
+                if (Options.RequiresDuplicateDetection != null)
                 {
-                    description.RequiresDuplicateDetection = options.RequiresDuplicateDetection.Value;
+                    description.RequiresDuplicateDetection = Options.RequiresDuplicateDetection.Value;
                 }
 
-                if (options.Configure != null)
+                if (Options.Configure != null)
                 {
-                    options.Configure(description);
+                    Options.Configure(description);
                 }
 
-                namespaceManager.CreateQueue(description);
+                await _managementClient.CreateQueueAsync(description).ConfigureAwait(false);
             }
             catch (UnauthorizedAccessException ex)
             {

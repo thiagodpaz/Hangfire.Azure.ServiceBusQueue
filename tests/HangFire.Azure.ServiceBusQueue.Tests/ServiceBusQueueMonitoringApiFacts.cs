@@ -1,7 +1,8 @@
 ﻿using System.Threading;
+using System.Threading.Tasks;
 using Hangfire.Azure.ServiceBusQueue;
 using Hangfire.SqlServer;
-using Microsoft.ServiceBus;
+using Microsoft.Azure.ServiceBus.Management;
 using NUnit.Framework;
 
 namespace HangFire.Azure.ServiceBusQueue.Tests
@@ -25,13 +26,13 @@ namespace HangFire.Azure.ServiceBusQueue.Tests
         }
 
         [TearDown]
-        public void DeleteQueues()
+        public async Task DeleteQueues()
         {
-            var manager = NamespaceManager.CreateFromConnectionString(options.ConnectionString);
+            var manager = new ManagementClient(options.ConnectionString);
 
             foreach(var queue in options.Queues)
             {
-                manager.DeleteQueue(options.QueuePrefix + queue);
+                await manager.DeleteQueueAsync(options.QueuePrefix + queue);
             }
         }
 
@@ -51,7 +52,7 @@ namespace HangFire.Azure.ServiceBusQueue.Tests
         public void GetEnqueuedAndFetchedCount_WhenJobs_ShouldCountFromQueue()
         {
             // Arrange
-            queue.Enqueue(null, options.Queues[0], "1234");
+            queue.Enqueue(null, null, options.Queues[0], "1234");
 
             // Act
             var counts = monitor.GetEnqueuedAndFetchedCount(options.Queues[0]);
@@ -62,13 +63,13 @@ namespace HangFire.Azure.ServiceBusQueue.Tests
         }
 
         [Test]
-        public void GetEnqueuedAndFetchedCount_WhenDeadlettered_ShouldIgnore()
+        public async Task GetEnqueuedAndFetchedCount_WhenDeadlettered_ShouldIgnore()
         {
             // Arrange
-            queue.Enqueue(null, options.Queues[0], "1234");
+            queue.Enqueue(null, null, options.Queues[0], "1234");
 
             var job = (ServiceBusQueueFetchedJob)queue.Dequeue(options.Queues, default(CancellationToken));
-            job.Message.DeadLetter();
+            await job.DeadLetterAsync();
 
             // Act
             var counts = monitor.GetEnqueuedAndFetchedCount(options.Queues[0]);
@@ -82,10 +83,10 @@ namespace HangFire.Azure.ServiceBusQueue.Tests
         public void GetEnqueuedJobIds_WhenJobs_ShouldWorkPage1()
         {
             // Arrange
-            queue.Enqueue(null, options.Queues[0], "1");
-            queue.Enqueue(null, options.Queues[0], "2");
-            queue.Enqueue(null, options.Queues[0], "3");
-            queue.Enqueue(null, options.Queues[0], "4");
+            queue.Enqueue(null, null, options.Queues[0], "1");
+            queue.Enqueue(null, null, options.Queues[0], "2");
+            queue.Enqueue(null, null, options.Queues[0], "3");
+            queue.Enqueue(null, null, options.Queues[0], "4");
 
             // Act
             var counts = monitor.GetEnqueuedJobIds(options.Queues[0], 0, 5);
@@ -98,10 +99,10 @@ namespace HangFire.Azure.ServiceBusQueue.Tests
         public void GetEnqueuedJobIds_WhenJobs_ShouldWorkPage2()
         {
             // Arrange
-            queue.Enqueue(null, options.Queues[0], "1");
-            queue.Enqueue(null, options.Queues[0], "2");
-            queue.Enqueue(null, options.Queues[0], "3");
-            queue.Enqueue(null, options.Queues[0], "4");
+            queue.Enqueue(null, null, options.Queues[0], "1");
+            queue.Enqueue(null, null, options.Queues[0], "2");
+            queue.Enqueue(null, null, options.Queues[0], "3");
+            queue.Enqueue(null, null, options.Queues[0], "4");
 
             // Act
             var counts1 = monitor.GetEnqueuedJobIds(options.Queues[0], 0, 2);
@@ -118,7 +119,7 @@ namespace HangFire.Azure.ServiceBusQueue.Tests
             // Arrange
             for(var i = 0; i < 100; i++)
             {
-                queue.Enqueue(null, options.Queues[0], i.ToString());
+                queue.Enqueue(null, null, options.Queues[0], i.ToString());
             }
 
             // Act

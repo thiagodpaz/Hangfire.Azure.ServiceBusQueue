@@ -1,45 +1,48 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Hangfire.Logging;
 using Hangfire.Storage;
-using Microsoft.ServiceBus.Messaging;
+using Microsoft.Azure.ServiceBus;
+using Microsoft.Azure.ServiceBus.Core;
+using Newtonsoft.Json;
 
 namespace Hangfire.Azure.ServiceBusQueue
 {
     internal class ServiceBusQueueFetchedJob : IFetchedJob
     {
         private readonly ILog _logger = LogProvider.GetLogger(typeof(ServiceBusQueueFetchedJob));
-        private readonly BrokeredMessage _message;
+        private readonly MessageReceiver _client;
+        private readonly Message _message;
         private readonly TimeSpan? _lockRenewalDelay;
         private readonly CancellationTokenSource _cancellationTokenSource;
 
         private bool _completed;
         private bool _disposed;
 
-        public ServiceBusQueueFetchedJob(BrokeredMessage message, TimeSpan? lockRenewalDelay)
+        public ServiceBusQueueFetchedJob(MessageReceiver client, Message message, TimeSpan? lockRenewalDelay)
         {
-            if (message == null) throw new ArgumentNullException("message");
-
-            _message = message;
+            _client = client;
+            _message = message ?? throw new ArgumentNullException("message");
             _lockRenewalDelay = lockRenewalDelay;
             _cancellationTokenSource = new CancellationTokenSource();
 
-            JobId = _message.GetBody<string>();
+            JobId = Encoding.UTF8.GetString(message.Body);
 
             KeepAlive();
         }
 
         public string JobId { get; private set; }
 
-        public BrokeredMessage Message { get { return this._message; } }
+        public Message Message => _message;
 
         public void Requeue()
         {
             _cancellationTokenSource.Cancel();
 
-            _message.Abandon();
+            Task.Run(() => _client.AbandonAsync(_message.SystemProperties.LockToken)).Wait();
             _completed = true;
         }
 
@@ -47,7 +50,7 @@ namespace Hangfire.Azure.ServiceBusQueue
         {
             _cancellationTokenSource.Cancel();
 
-            _message.Complete();
+            Task.Run(() => _client.CompleteAsync(_message.SystemProperties.LockToken)).Wait();
             _completed = true;
         }
 
@@ -57,10 +60,9 @@ namespace Hangfire.Azure.ServiceBusQueue
 
             if (!_completed && !_disposed)
             {
-                _message.Abandon();
+                Task.Run(() => _client.AbandonAsync(_message.SystemProperties.LockToken)).Wait();
             }
 
-            _message.Dispose();
             _disposed = true;
         }
 
@@ -78,8 +80,8 @@ namespace Hangfire.Azure.ServiceBusQueue
                     // lock that's expired too early.
                     var toWait = _lockRenewalDelay.HasValue
                         ? _lockRenewalDelay.Value
-                        : _message.LockedUntilUtc - DateTime.UtcNow - TimeSpan.FromSeconds(1);
-                    
+                        : _message.SystemProperties.LockedUntilUtc - DateTime.UtcNow - TimeSpan.FromSeconds(1);
+
                     await Task.Delay(toWait, _cancellationTokenSource.Token);
 
                     // Double check we have not been cancelled to avoid renewing a lock
@@ -88,7 +90,7 @@ namespace Hangfire.Azure.ServiceBusQueue
                     {
                         try
                         {
-                            _message.RenewLock();
+                            await _client.RenewLockAsync(_message);
                         }
                         catch (Exception ex)
                         {
@@ -99,6 +101,16 @@ namespace Hangfire.Azure.ServiceBusQueue
                     }
                 }
             }, _cancellationTokenSource.Token);
+        }
+
+        internal async Task DeadLetterAsync()
+        {
+            _cancellationTokenSource.Cancel();
+
+            if (!_completed && !_disposed)
+            {
+                await _client.DeadLetterAsync(_message.SystemProperties.LockToken);
+            }
         }
     }
 }

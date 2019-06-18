@@ -4,8 +4,12 @@ using System.Threading;
 using System.Transactions;
 using Hangfire.SqlServer;
 using Hangfire.Storage;
-using Microsoft.ServiceBus.Messaging;
 using System.Data;
+using Microsoft.Azure.ServiceBus;
+using System.Threading.Tasks;
+using Microsoft.Azure.ServiceBus.Core;
+using System.Text;
+using System.Data.Common;
 
 namespace Hangfire.Azure.ServiceBusQueue
 {
@@ -18,67 +22,72 @@ namespace Hangfire.Azure.ServiceBusQueue
 
         public ServiceBusQueueJobQueue(ServiceBusManager manager, ServiceBusQueueOptions options)
         {
-            if (manager == null) throw new ArgumentNullException("manager");
-            if (options == null) throw new ArgumentNullException("options");
-
-            _manager = manager;
-            _options = options;
+            _manager = manager ?? throw new ArgumentNullException("manager");
+            _options = options ?? throw new ArgumentNullException("options");
         }
 
         public IFetchedJob Dequeue(string[] queues, CancellationToken cancellationToken)
         {
-            BrokeredMessage message = null;
-            var queueIndex = 0;
-
-            var clients = queues
-                .Select(queue => _manager.GetClient(queue))
-                .ToArray();
-
-            do
+            var job = Task.Run(async () =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                var queueIndex = 0;
 
-                try
+                var clients = await Task.WhenAll(queues.Select(queue => _manager.GetClientAsync(queue)));
+
+                do
                 {
-                    var client = clients[queueIndex];
-                    var isLastQueue = queueIndex == queues.Length - 1;
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                    message = isLastQueue
-                        ? client.Receive(_manager.Options.LoopReceiveTimeout) // Last queue
-                        : client.Receive(MinSyncReceiveTimeout);
-                }
-                catch (TimeoutException)
-                {
-                }
-                catch (MessagingEntityNotFoundException ex)
-                {
-                    var errorMessage = string.Format(
-                        "Queue {0} could not be found. Either create the queue manually, " +
-                        "or grant the Manage permission and set ServiceBusQueueOptions.CheckAndCreateQueues to true",
-                        clients[queueIndex].Path);
+                    try
+                    {
+                        var client = clients[queueIndex];
+                        var messageReceiver = new MessageReceiver(client.ServiceBusConnection, client.Path, client.ReceiveMode);
+                        var isLastQueue = queueIndex == queues.Length - 1;
 
-                    throw new UnauthorizedAccessException(errorMessage, ex);
-                }
+                        var message = await (isLastQueue
+                            ? messageReceiver.ReceiveAsync(_manager.Options.LoopReceiveTimeout) // Last queue
+                            : messageReceiver.ReceiveAsync(MinSyncReceiveTimeout));
 
-                queueIndex = (queueIndex + 1) % queues.Length;
-            } while (message == null);
+                        if (message != null)
+                        {
+                            return new ServiceBusQueueFetchedJob(messageReceiver, message, _options.LockRenewalDelay);
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                    }
+                    catch (MessagingEntityNotFoundException ex)
+                    {
+                        var errorMessage = string.Format(
+                            "Queue {0} could not be found. Either create the queue manually, " +
+                            "or grant the Manage permission and set ServiceBusQueueOptions.CheckAndCreateQueues to true",
+                            clients[queueIndex].Path);
 
-            return new ServiceBusQueueFetchedJob(message, _options.LockRenewalDelay);
+                        throw new UnauthorizedAccessException(errorMessage, ex);
+                    }
+
+                    queueIndex = (queueIndex + 1) % queues.Length;
+                    await Task.Delay(100);
+                } while (true);
+            }).GetAwaiter().GetResult();
+
+            return job;
         }
 
-        public void Enqueue(IDbConnection connection, string queue, string jobId)
+        public void Enqueue(DbConnection connection, DbTransaction transaction, string queue, string jobId)
         {
             // Because we are within a TransactionScope at this point the below
             // call would not work (Local transactions are not supported with other resource managers/DTC
             // exception is thrown) without suppression
             using (new TransactionScope(TransactionScopeOption.Suppress))
             {
-                var client = _manager.GetClient(queue);
-
-                using (var message = new BrokeredMessage(jobId) { MessageId = jobId })
+                Task.Run(async () =>
                 {
-                    _manager.Options.RetryPolicy.Execute(() => client.Send(message));
-                }
+                    var client = await _manager.GetClientAsync(queue);
+
+                    var message = new Message(Encoding.UTF8.GetBytes(jobId));
+                    await _manager.Options.RetryPolicy.Execute(() => client.SendAsync(message));
+                }).Wait();
             }
         }
     }
