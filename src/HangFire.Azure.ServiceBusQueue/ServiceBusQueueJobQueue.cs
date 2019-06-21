@@ -53,7 +53,7 @@ namespace Hangfire.Azure.ServiceBusQueue
                             return new ServiceBusQueueFetchedJob(messageReceiver, message, _options.LockRenewalDelay);
                         }
                     }
-                    catch (TimeoutException)
+                    catch (ServiceBusTimeoutException)
                     {
                     }
                     catch (MessagingEntityNotFoundException ex)

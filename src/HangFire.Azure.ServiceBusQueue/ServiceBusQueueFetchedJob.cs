@@ -31,7 +31,7 @@ namespace Hangfire.Azure.ServiceBusQueue
 
             JobId = Encoding.UTF8.GetString(message.Body);
 
-            KeepAlive();
+            Task.Run(() => KeepAlive());
         }
 
         public string JobId { get; private set; }
@@ -66,41 +66,42 @@ namespace Hangfire.Azure.ServiceBusQueue
             _disposed = true;
         }
 
-        private void KeepAlive()
+        private async Task KeepAlive()
         {
-            Task.Run(async () =>
+            while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
-                while (!_cancellationTokenSource.Token.IsCancellationRequested)
+                // Previously we were waiting until a second before the lock is due
+                // to expire to give us plenty of time to wake up and communicate
+                // with queue to renew the lock of this message before expiration.
+                // However since clocks may be non-synchronized well, for long-running
+                // background jobs it's better to have more renewal attempts than a
+                // lock that's expired too early.
+                var toWait = _lockRenewalDelay.HasValue
+                    ? _lockRenewalDelay.Value
+                    : _message.SystemProperties.LockedUntilUtc - DateTime.UtcNow - TimeSpan.FromSeconds(1);
+
+                await Task.Delay(toWait, _cancellationTokenSource.Token);
+
+                // Double check we have not been cancelled to avoid renewing a lock
+                // unnecessarily
+                if (!_cancellationTokenSource.Token.IsCancellationRequested)
                 {
-                    // Previously we were waiting until a second before the lock is due
-                    // to expire to give us plenty of time to wake up and communicate
-                    // with queue to renew the lock of this message before expiration.
-                    // However since clocks may be non-synchronized well, for long-running
-                    // background jobs it's better to have more renewal attempts than a
-                    // lock that's expired too early.
-                    var toWait = _lockRenewalDelay.HasValue
-                        ? _lockRenewalDelay.Value
-                        : _message.SystemProperties.LockedUntilUtc - DateTime.UtcNow - TimeSpan.FromSeconds(1);
-
-                    await Task.Delay(toWait, _cancellationTokenSource.Token);
-
-                    // Double check we have not been cancelled to avoid renewing a lock
-                    // unnecessarily
-                    if (!_cancellationTokenSource.Token.IsCancellationRequested)
+                    try
                     {
-                        try
-                        {
-                            await _client.RenewLockAsync(_message);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.DebugException(
-                                String.Format("An exception was thrown while trying to renew a lock for job '{0}'.", JobId),
-                                ex);
-                        }
+                        await _client.RenewLockAsync(_message);
+                    }
+                    catch (MessageLockLostException)
+                    {
+
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.DebugException(
+                            string.Format("An exception was thrown while trying to renew a lock for job '{0}'.", JobId),
+                            ex);
                     }
                 }
-            }, _cancellationTokenSource.Token);
+            }
         }
 
         internal async Task DeadLetterAsync()
