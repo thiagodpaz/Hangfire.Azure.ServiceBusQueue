@@ -1,24 +1,19 @@
-Properties {
-    $solution = "HangFire.Azure.ServiceBusQueue.sln"
-}
-
-Include "packages\Hangfire.Build.0.1.3\tools\psake-common.ps1"
+Include "packages\Hangfire.Build.0.2.6\tools\psake-common.ps1"
 
 Task Default -Depends Collect
+Task CI -Depends Pack
 
-Task Collect -Depends Compile -Description "Copy all artifacts to the build folder." {
-    Collect-Assembly "Hangfire.Azure.ServiceBusQueue" "Net45"
+Task Build -Depends Clean -Description "Restore all the packages and build the whole solution." {
+    Exec { dotnet build -c Release }
+}
+
+Task Collect -Depends Build -Description "Copy all artifacts to the build folder." {
+    Collect-Assembly "Hangfire.Azure.ServiceBusQueue" "netstandard2.0"
 }
 
 Task Pack -Depends Collect -Description "Create NuGet packages and archive files." {
-    $version = Get-BuildVersion
+    $version = Get-PackageVersion
 
-    $tag = $env:APPVEYOR_REPO_TAG_NAME
-    if ($tag -And $tag.StartsWith("v$version-")) {
-        "Using tag-based version for packages."
-        $version = $tag.Substring(1)
-    }
-    
     Create-Archive "Hangfire.Azure.ServiceBusQueue-$version"
-    Create-Package "Hangfire.Azure.ServiceBusQueue" $version
+	Exec { dotnet pack -c Release -p:PackageVersion=$version -o "$build_dir" --include-symbols }
 }
