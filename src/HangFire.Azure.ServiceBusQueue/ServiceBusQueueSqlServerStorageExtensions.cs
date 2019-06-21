@@ -61,7 +61,7 @@ namespace Hangfire.Azure.ServiceBusQueue
         }
 
         public static IGlobalConfiguration UseServiceBusQueues(
-            [NotNull] this IGlobalConfiguration configuration,
+            [NotNull] this IGlobalConfiguration<SqlServerStorage> configuration,
             [NotNull] string connectionString)
         {
             return UseServiceBusQueues(configuration, new ServiceBusQueueOptions
@@ -72,7 +72,7 @@ namespace Hangfire.Azure.ServiceBusQueue
         }
 
         public static IGlobalConfiguration UseServiceBusQueues(
-            [NotNull] this IGlobalConfiguration configuration,
+            [NotNull] this IGlobalConfiguration<SqlServerStorage> configuration,
             [NotNull] string connectionString,
             params string[] queues)
         {
@@ -84,7 +84,7 @@ namespace Hangfire.Azure.ServiceBusQueue
         }
 
         public static IGlobalConfiguration UseServiceBusQueues(
-            [NotNull] this IGlobalConfiguration configuration,
+            [NotNull] this IGlobalConfiguration<SqlServerStorage> configuration,
             [NotNull] string connectionString,
             Action<QueueDescription> configureAction,
             params string[] queues)
@@ -98,15 +98,12 @@ namespace Hangfire.Azure.ServiceBusQueue
         }
 
         public static IGlobalConfiguration UseServiceBusQueues(
-            [NotNull] this IGlobalConfiguration configuration,
+            [NotNull] this IGlobalConfiguration<SqlServerStorage> configuration,
             [NotNull] ServiceBusQueueOptions options)
         {
-            if (JobStorage.Current is SqlServerStorage sqlServerStorage)
-            {
-                var provider = new ServiceBusQueueJobQueueProvider(options);
-
-                sqlServerStorage.QueueProviders.Add(provider, options.Queues);
-            }
+            var sqlServerStorage = configuration.Entry;
+            var provider = new ServiceBusQueueJobQueueProvider(options);
+            sqlServerStorage.QueueProviders.Add(provider, options.Queues);
             return configuration;
         }
     }
