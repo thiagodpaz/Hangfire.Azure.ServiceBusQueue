@@ -5,6 +5,7 @@ using Microsoft.Azure.ServiceBus.Management;
 using Hangfire.Logging;
 using System.Threading.Tasks;
 using Microsoft.Azure.ServiceBus.Core;
+using System.Threading;
 
 namespace Hangfire.Azure.ServiceBusQueue
 {
@@ -15,6 +16,7 @@ namespace Hangfire.Azure.ServiceBusQueue
         // Stores the pre-created QueueClients (note the key is the unprefixed queue name)
         private readonly Dictionary<string, (QueueClient, MessageReceiver)> _clients;
         private readonly ManagementClient _managementClient;
+        private static readonly SemaphoreSlim semaphoreSlim = new SemaphoreSlim(1, 1);
 
         public ServiceBusManager(ServiceBusQueueOptions options)
         {
@@ -47,12 +49,22 @@ namespace Hangfire.Azure.ServiceBusQueue
 
         public async Task<(QueueClient, MessageReceiver)> GetClientAsync(string queue)
         {
-            if (_clients.Count != Options.Queues.Length)
-            {
-                await CreateQueueClients().ConfigureAwait(false);
-            }
+            await semaphoreSlim.WaitAsync();
 
-            return _clients[queue];
+            try
+            {
+                if (_clients.Count != Options.Queues.Length)
+                {
+                    await CreateQueueClients().ConfigureAwait(false);
+                }
+
+                return _clients[queue];
+
+            }
+            finally
+            {
+                semaphoreSlim.Release();
+            }
         }
 
         public Task<QueueDescription> GetDescriptionAsync(string queue)
