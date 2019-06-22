@@ -1,12 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <AssemblyTitle>Hangfire.Azure.ServiceBus</AssemblyTitle>
-    <Product>Hangfire.Azure.ServiceBus</Product>
+    <AssemblyTitle>HangFire.Azure.ServiceBusQueue</AssemblyTitle>
+    <Product>HangFire.Azure.ServiceBusQueue</Product>
     <Title>Hangfire Azure ServiceBus Queue</Title>
     <Authors>Sergey Odinokov, Adam Barclay</Authors>
     <RepositoryUrl>https://github.com/HangfireIO/HangFire.Azure.ServiceBusQueue</RepositoryUrl>
-    <PackageId>Hangfire.Azure.ServiceBus</PackageId>
+    <PackageId>HangFire.Azure.ServiceBusQueue</PackageId>
     <PackageProjectUrl>https://github.com/HangfireIO/HangFire.Azure.ServiceBusQueue</PackageProjectUrl>
     <PackageLicenseUrl>https://raw.github.com/odinserj/HangFire.Azure.ServiceBusQueue/master/license.txt</PackageLicenseUrl>
     <Description>ServiceBus Queue support for SQL Server job storage implementation</Description>
