@@ -38,10 +38,10 @@ namespace Hangfire.Azure.ServiceBusQueue
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
+                    var (queryclient, messageReceiver) = clients[queueIndex];
+
                     try
                     {
-                        var client = clients[queueIndex];
-                        var messageReceiver = new MessageReceiver(client.ServiceBusConnection, client.Path, client.ReceiveMode);
                         var isLastQueue = queueIndex == queues.Length - 1;
 
                         var message = await (isLastQueue
@@ -61,7 +61,7 @@ namespace Hangfire.Azure.ServiceBusQueue
                         var errorMessage = string.Format(
                             "Queue {0} could not be found. Either create the queue manually, " +
                             "or grant the Manage permission and set ServiceBusQueueOptions.CheckAndCreateQueues to true",
-                            clients[queueIndex].Path);
+                            queryclient.Path);
 
                         throw new UnauthorizedAccessException(errorMessage, ex);
                     }
@@ -83,10 +83,10 @@ namespace Hangfire.Azure.ServiceBusQueue
             {
                 Task.Run(async () =>
                 {
-                    var client = await _manager.GetClientAsync(queue);
+                    var (queryclient, messageReceiver) = await _manager.GetClientAsync(queue);
 
                     var message = new Message(Encoding.UTF8.GetBytes(jobId));
-                    await _manager.Options.RetryPolicy.Execute(() => client.SendAsync(message));
+                    await _manager.Options.RetryPolicy.Execute(() => queryclient.SendAsync(message));
                 }).Wait();
             }
         }

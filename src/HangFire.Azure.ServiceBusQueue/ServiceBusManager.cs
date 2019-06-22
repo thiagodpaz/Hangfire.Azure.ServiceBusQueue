@@ -13,7 +13,7 @@ namespace Hangfire.Azure.ServiceBusQueue
         private static readonly ILog Logger = LogProvider.GetCurrentClassLogger();
 
         // Stores the pre-created QueueClients (note the key is the unprefixed queue name)
-        private readonly Dictionary<string, QueueClient> _clients;
+        private readonly Dictionary<string, (QueueClient, MessageReceiver)> _clients;
         private readonly ManagementClient _managementClient;
 
         public ServiceBusManager(ServiceBusQueueOptions options)
@@ -22,7 +22,7 @@ namespace Hangfire.Azure.ServiceBusQueue
 
             Options = options;
 
-            _clients = new Dictionary<string, QueueClient>(options.Queues.Length);
+            _clients = new Dictionary<string, (QueueClient, MessageReceiver)>(options.Queues.Length);
             _managementClient = new ManagementClient(options.ConnectionString);
             if (options.CheckAndCreateQueues)
             {
@@ -30,9 +30,22 @@ namespace Hangfire.Azure.ServiceBusQueue
             }
         }
 
+        ~ServiceBusManager()
+        {
+            foreach (var keyValue in _clients)
+            {
+                var (queueClient, messageReceiver) = keyValue.Value;
+                Task.Run(async () =>
+                {
+                    await queueClient.CloseAsync();
+                    await messageReceiver.CloseAsync();
+                }).Wait();
+            }
+        }
+
         public ServiceBusQueueOptions Options { get; }
 
-        public async Task<QueueClient> GetClientAsync(string queue)
+        public async Task<(QueueClient, MessageReceiver)> GetClientAsync(string queue)
         {
             if (_clients.Count != Options.Queues.Length)
             {
@@ -63,7 +76,13 @@ namespace Hangfire.Azure.ServiceBusQueue
                 Logger.TraceFormat("Creating new QueueClient for queue {0}", prefixedQueue);
 
                 // Do not store as prefixed queue to avoid having to re-create name in GetClient method
-                _clients[queue] = new QueueClient(Options.ConnectionString, prefixedQueue, ReceiveMode.PeekLock);
+                if (!_clients.ContainsKey(queue))
+                {
+                    _clients[queue] = (
+                        new QueueClient(Options.ConnectionString, prefixedQueue, ReceiveMode.PeekLock),
+                        new MessageReceiver(Options.ConnectionString, prefixedQueue, ReceiveMode.PeekLock)
+                        );
+                }
             }
         }
 

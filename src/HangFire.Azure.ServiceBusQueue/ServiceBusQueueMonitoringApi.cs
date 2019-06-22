@@ -15,11 +15,8 @@ namespace Hangfire.Azure.ServiceBusQueue
 
         public ServiceBusQueueMonitoringApi(ServiceBusManager manager, string[] queues)
         {
-            if (manager == null) throw new ArgumentNullException("manager");
-            if (queues == null) throw new ArgumentNullException("queues");
-
-            _manager = manager;
-            _queues = queues;
+            _manager = manager ?? throw new ArgumentNullException("manager");
+            _queues = queues ?? throw new ArgumentNullException("queues");
         }
 
         public IEnumerable<string> GetQueues()
@@ -31,8 +28,7 @@ namespace Hangfire.Azure.ServiceBusQueue
         {
             var results = Task.Run(async () =>
             {
-                var client = await _manager.GetClientAsync(queue);
-                var messageReceiver = new MessageReceiver(client.ServiceBusConnection, client.Path, client.ReceiveMode);
+                var (queryclient, messageReceiver) = await _manager.GetClientAsync(queue);
 
                 var jobIds = new List<long>();
 
