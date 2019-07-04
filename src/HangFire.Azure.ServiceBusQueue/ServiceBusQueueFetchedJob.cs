@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,15 +43,36 @@ namespace Hangfire.Azure.ServiceBusQueue
         {
             _cancellationTokenSource.Cancel();
 
-            Task.Run(() => _client.AbandonAsync(_message.SystemProperties.LockToken)).Wait();
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await _client.AbandonAsync(_message.SystemProperties.LockToken);
+                }
+                catch (Exception ex) when (ex is MessageNotFoundException
+                || ex is MessageLockLostException)
+                {
+
+                }
+            }).Wait();
             _completed = true;
         }
 
         public void RemoveFromQueue()
         {
             _cancellationTokenSource.Cancel();
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await _client.CompleteAsync(_message.SystemProperties.LockToken);
+                }
+                catch (Exception ex) when (ex is MessageNotFoundException
+                || ex is MessageLockLostException)
+                {
 
-            Task.Run(() => _client.CompleteAsync(_message.SystemProperties.LockToken)).Wait();
+                }
+            }).Wait();
             _completed = true;
         }
 
@@ -60,7 +82,18 @@ namespace Hangfire.Azure.ServiceBusQueue
 
             if (!_completed && !_disposed)
             {
-                Task.Run(() => _client.AbandonAsync(_message.SystemProperties.LockToken)).Wait();
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _client.AbandonAsync(_message.SystemProperties.LockToken);
+                    }
+                    catch (Exception ex) when (ex is MessageNotFoundException
+                    || ex is MessageLockLostException)
+                    {
+
+                    }
+                }).Wait();
             }
 
             _disposed = true;
@@ -90,9 +123,10 @@ namespace Hangfire.Azure.ServiceBusQueue
                     {
                         await _client.RenewLockAsync(_message);
                     }
-                    catch (MessageLockLostException)
+                    catch (Exception ex) when (ex is MessageNotFoundException
+                    || ex is MessageLockLostException)
                     {
-
+                        break;
                     }
                     catch (Exception ex)
                     {
