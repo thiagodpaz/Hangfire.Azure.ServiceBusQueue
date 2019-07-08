@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Microsoft.Azure.ServiceBus.Core;
 using System.Text;
 using System.Data.Common;
+using Hangfire.Logging;
 
 namespace Hangfire.Azure.ServiceBusQueue
 {
@@ -19,6 +20,7 @@ namespace Hangfire.Azure.ServiceBusQueue
 
         private readonly ServiceBusManager _manager;
         private readonly ServiceBusQueueOptions _options;
+        private static readonly ILog Logger = LogProvider.GetCurrentClassLogger();
 
         public ServiceBusQueueJobQueue(ServiceBusManager manager, ServiceBusQueueOptions options)
         {
@@ -50,6 +52,7 @@ namespace Hangfire.Azure.ServiceBusQueue
 
                         if (message != null)
                         {
+                            Logger.InfoFormat($"Dequeue one message from queue {queryclient.QueueName} with size {message.Size}");
                             return new ServiceBusQueueFetchedJob(messageReceiver, message, _options.LockRenewalDelay);
                         }
                     }
