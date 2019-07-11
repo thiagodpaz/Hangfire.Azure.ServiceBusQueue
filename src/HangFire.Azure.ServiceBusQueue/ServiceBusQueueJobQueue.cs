@@ -90,6 +90,7 @@ namespace Hangfire.Azure.ServiceBusQueue
 
                     var message = new Message(Encoding.UTF8.GetBytes(jobId));
                     await _manager.Options.RetryPolicy.Execute(() => queryclient.SendAsync(message));
+                    Logger.InfoFormat($"Enqueue one message to queue {queryclient.QueueName} with size {message.Size}");
                 }).Wait();
             }
         }
