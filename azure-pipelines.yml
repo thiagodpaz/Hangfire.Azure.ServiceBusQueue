@@ -1,0 +1,44 @@
+# https://aka.ms/yaml
+
+name: 4.1.$(date:yyyyMMdd)$(rev:.r)
+
+trigger:
+  - netstandard
+
+pool:
+  vmImage: 'windows-2019'
+
+steps:
+  - task: DotNetCoreCLI@2
+    displayName: Nuget pack
+    inputs:
+      command: pack
+      versioningScheme: byBuildNumber
+      includesymbols: true
+      includesource: true
+      packagesToPack: '$(Build.SourcesDirectory)/src/HangFire.Azure.ServiceBusQueue/HangFire.Azure.ServiceBusQueue.csproj'
+      verbosityRestore: 'detailed'
+
+  - task: DotNetCoreCLI@2
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    displayName: Nuget push
+    inputs:
+      command: push
+      packagesToPush: '$(Build.ArtifactStagingDirectory)/*.*nupkg'
+      publishVstsFeed: $(ArtifactFeed)
+
+  #For debug
+  - task: PublishPipelineArtifact@1
+    displayName: DEBUG - Publish Artifact - sources
+    condition: eq( variables['system.debug'], 'true' )
+    inputs:
+      artifactName: 'drop-debug-sources'
+      targetPath: '$(Build.SourcesDirectory)'
+
+  #For debug
+  - task: PublishPipelineArtifact@1
+    displayName: DEBUG - Publish Artifact - staging
+    condition: eq( variables['system.debug'], 'true' )
+    inputs:
+      artifactName: 'drop-debug-staging'
+      targetPath: '$(Build.ArtifactStagingDirectory)'
